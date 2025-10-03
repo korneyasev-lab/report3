@@ -5,6 +5,38 @@
 """
 
 import os
+import sys
+import platform
+
+# =============================================================================
+# ОПРЕДЕЛЕНИЕ РАБОЧЕЙ ДИРЕКТОРИИ
+# =============================================================================
+
+def get_base_path():
+    """Получить базовую директорию для работы программы"""
+    if getattr(sys, 'frozen', False):
+        # Запущен как .exe/.app
+        if platform.system() == 'Windows':
+            # На Windows - папка Documents пользователя
+            return os.path.join(os.path.expanduser('~'), 'Documents', 'SistemaOtchetov')
+        else:
+            # На macOS - рядом с программой
+            return os.path.dirname(sys.executable)
+    else:
+        # Запущен из исходников
+        return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_path()
+
+# Папки для работы программы
+FORMS_DIR = os.path.join(BASE_DIR, "формы")
+REPORTS_DIR = os.path.join(BASE_DIR, "отчеты")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "шаблоны")
+DB_PATH = os.path.join(BASE_DIR, "reports.db")
+
+# Создать папки при импорте
+for directory in [BASE_DIR, FORMS_DIR, REPORTS_DIR, TEMPLATES_DIR]:
+    os.makedirs(directory, exist_ok=True)
 
 # =============================================================================
 # ПУТИ К ФАЙЛАМ И ПАПКАМ
