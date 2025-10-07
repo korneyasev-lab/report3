@@ -11,6 +11,8 @@ import subprocess
 import os
 import sys
 import config
+from telegram_service import TelegramService, validate_settings
+from telegram_config import save_telegram_settings, load_telegram_settings
 
 
 class ReportApp:
@@ -703,6 +705,22 @@ class ReportApp:
 
             tk.Button(
                 btn_frame,
+                text="📤 Отправить в Telegram",
+                font=("Arial", self.FONT_SMALL),
+                width=25,
+                command=lambda: self.send_report_to_telegram(tree)
+            ).pack(side=tk.LEFT, padx=self.PADX)
+
+            tk.Button(
+                btn_frame,
+                text="⚙️ Настройки TG",
+                font=("Arial", self.FONT_SMALL),
+                width=18,
+                command=self.open_telegram_settings
+            ).pack(side=tk.LEFT, padx=self.PADX)
+
+            tk.Button(
+                btn_frame,
                 text="Удалить",
                 font=("Arial", self.FONT_SMALL),
                 width=20,
@@ -844,3 +862,171 @@ class ReportApp:
                     config.DIALOG_TITLES["error"],
                     f"Ошибка при удалении:\n{message}"
                 )
+
+    def open_telegram_settings(self):
+        """Открыть окно настроек Telegram (для кнопки ⚙️)"""
+        self.show_telegram_settings()
+
+    def send_report_to_telegram(self, tree):
+        """Отправить выбранный отчёт в Telegram"""
+        # Проверка выбора отчёта
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning(
+                config.DIALOG_TITLES["warning"],
+                config.ERROR_MESSAGES["select_report"]
+            )
+            return
+
+        # Получаем ID отчёта
+        report_id = tree.item(selected[0])['values'][0]
+
+        # Создаём сервис Telegram
+        telegram = TelegramService()
+
+        # Проверяем настройки
+        if not telegram.is_configured():
+            # Показываем окно настроек
+            self.show_telegram_settings(report_id)
+            return
+
+        # Отправляем отчёт
+        success, message = telegram.send_report(report_id)
+
+        if success:
+            messagebox.showinfo("Telegram", message)
+        else:
+            # Если ошибка - предлагаем настроить заново
+            if messagebox.askyesno(
+                "Ошибка отправки",
+                f"{message}\n\nХотите проверить настройки Telegram?"
+            ):
+                self.show_telegram_settings(report_id)
+
+    def show_telegram_settings(self, report_id=None):
+        """Окно настроек Telegram"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Настройки Telegram")
+        settings_window.geometry("600x500")
+
+        # Заголовок
+        tk.Label(
+            settings_window,
+            text="Настройки Telegram бота",
+            font=("Arial", self.FONT_MEDIUM, "bold")
+        ).pack(pady=15)
+
+        # Инструкция
+        instruction_frame = tk.LabelFrame(
+            settings_window,
+            text="📖 Инструкция",
+            font=("Arial", self.FONT_SMALL, "bold"),
+            padx=10,
+            pady=10
+        )
+        instruction_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+
+        instruction_text = scrolledtext.ScrolledText(
+            instruction_frame,
+            height=10,
+            width=65,
+            font=("Arial", self.FONT_SMALL - 1),
+            wrap=tk.WORD
+        )
+        instruction_text.pack(fill=tk.BOTH, expand=True)
+        instruction_text.insert(1.0, config.TELEGRAM_SETUP_INFO)
+        instruction_text.config(state=tk.DISABLED)
+
+        # Поля ввода
+        fields_frame = tk.Frame(settings_window)
+        fields_frame.pack(pady=10, padx=20, fill=tk.X)
+
+        # Токен бота
+        tk.Label(
+            fields_frame,
+            text="Токен бота:",
+            font=("Arial", self.FONT_SMALL)
+        ).grid(row=0, column=0, sticky="w", pady=5)
+
+        # Загрузить сохранённые настройки
+        saved_token, saved_chat_id = load_telegram_settings()
+        token_var = tk.StringVar(value=saved_token or config.TELEGRAM_BOT_TOKEN)
+        token_entry = tk.Entry(
+            fields_frame,
+            textvariable=token_var,
+            font=("Arial", self.FONT_SMALL),
+            width=45
+        )
+        token_entry.grid(row=0, column=1, pady=5, padx=10)
+
+        # Chat ID
+        tk.Label(
+            fields_frame,
+            text="Chat ID:",
+            font=("Arial", self.FONT_SMALL)
+        ).grid(row=1, column=0, sticky="w", pady=5)
+
+        chat_id_var = tk.StringVar(value=saved_chat_id or config.TELEGRAM_CHAT_ID)
+        chat_id_entry = tk.Entry(
+            fields_frame,
+            textvariable=chat_id_var,
+            font=("Arial", self.FONT_SMALL),
+            width=45
+        )
+        chat_id_entry.grid(row=1, column=1, pady=5, padx=10)
+
+        # Кнопки
+        buttons_frame = tk.Frame(settings_window)
+        buttons_frame.pack(pady=15)
+
+        def save_settings():
+            """Сохранить настройки в config.py"""
+            token = token_var.get().strip()
+            chat_id = chat_id_var.get().strip()
+
+            # Валидация
+            valid, error = validate_settings(token, chat_id)
+            if not valid:
+                messagebox.showerror("Ошибка валидации", error)
+                return
+
+            # Сохраняем в config (в памяти)
+            config.TELEGRAM_BOT_TOKEN = token
+            config.TELEGRAM_CHAT_ID = chat_id
+
+            # Сохраняем в файл для автозагрузки при следующем запуске
+            save_telegram_settings(token, chat_id)
+
+            # Тестируем соединение
+            telegram = TelegramService()
+            success, message = telegram.test_connection()
+
+            if success:
+                messagebox.showinfo("Успех", message)
+                settings_window.destroy()
+
+                # Если был передан report_id - отправляем отчёт
+                if report_id:
+                    success, msg = telegram.send_report(report_id)
+                    if success:
+                        messagebox.showinfo("Telegram", msg)
+                    else:
+                        messagebox.showerror("Ошибка", msg)
+            else:
+                messagebox.showerror("Ошибка", message)
+
+        tk.Button(
+            buttons_frame,
+            text="Тест соединения и сохранить",
+            font=("Arial", self.FONT_SMALL),
+            width=30,
+            command=save_settings
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            buttons_frame,
+            text="Отмена",
+            font=("Arial", self.FONT_SMALL),
+            width=15,
+            command=settings_window.destroy
+        ).pack(side=tk.LEFT, padx=5)
